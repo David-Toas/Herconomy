@@ -1,0 +1,889 @@
+openapi: 3.0.3
+info:
+  title: Subscription Marketplace API
+  version: 1.0.0
+  description: Production-grade backend for a subscription-based marketplace with
+    multi-role auth, payments, webhooks, and celery background processing.
+paths:
+  /api/auth/login/:
+    post:
+      operationId: auth_login_create
+      description: Authenticates via email and password, returning JWT access and
+        refresh tokens.
+      summary: User login
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Successful authentication
+        '400':
+          description: Invalid credentials
+  /api/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      description: Returns details for the currently authenticated user.
+      summary: Current user profile
+      tags:
+      - auth
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    patch:
+      operationId: auth_me_partial_update
+      description: Updates user profile fields (name). The role field is read-only.
+      summary: Update current user profile
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/auth/register/:
+    post:
+      operationId: auth_register_create
+      description: |-
+        POST /api/auth/register/
+        Registers a new Customer or Provider user account.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegistrationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserRegistrationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserRegistrationRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRegistration'
+          description: ''
+  /api/auth/token/refresh/:
+    post:
+      operationId: auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/payments/webhook/:
+    post:
+      operationId: payments_webhook_create
+      description: Receives external payment provider events (e.g. payment.success,
+        payment.failed). Idempotent.
+      summary: Process payment webhook
+      tags:
+      - payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhookRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhookRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhookRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Webhook processed successfully or already handled
+        '400':
+          description: Invalid payload or amount mismatch
+        '404':
+          description: Payment reference not found
+  /api/plans/:
+    get:
+      operationId: plans_list
+      description: Returns paginated active subscription plans. Results are cached
+        in Redis.
+      summary: List subscription plans
+      parameters:
+      - in: query
+        name: billing_interval
+        schema:
+          type: string
+          enum:
+          - MONTHLY
+          - YEARLY
+        description: |-
+          * `MONTHLY` - Monthly
+          * `YEARLY` - Yearly
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: my_plans
+        schema:
+          type: boolean
+        description: Filter to only plans owned by authenticated provider
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlanList'
+          description: ''
+    post:
+      operationId: plans_create
+      description: |-
+        CRUD ViewSet for subscription plans.
+        - POST: Only providers can create plans.
+        - GET: Public listing is cached in Redis with automatic cache invalidation on changes.
+        - PATCH/DELETE: Only the owning provider can modify their plans.
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+  /api/plans/{id}/:
+    get:
+      operationId: plans_retrieve
+      description: |-
+        CRUD ViewSet for subscription plans.
+        - POST: Only providers can create plans.
+        - GET: Public listing is cached in Redis with automatic cache invalidation on changes.
+        - PATCH/DELETE: Only the owning provider can modify their plans.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    put:
+      operationId: plans_update
+      description: |-
+        CRUD ViewSet for subscription plans.
+        - POST: Only providers can create plans.
+        - GET: Public listing is cached in Redis with automatic cache invalidation on changes.
+        - PATCH/DELETE: Only the owning provider can modify their plans.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    patch:
+      operationId: plans_partial_update
+      description: |-
+        CRUD ViewSet for subscription plans.
+        - POST: Only providers can create plans.
+        - GET: Public listing is cached in Redis with automatic cache invalidation on changes.
+        - PATCH/DELETE: Only the owning provider can modify their plans.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    delete:
+      operationId: plans_destroy
+      description: |-
+        CRUD ViewSet for subscription plans.
+        - POST: Only providers can create plans.
+        - GET: Public listing is cached in Redis with automatic cache invalidation on changes.
+        - PATCH/DELETE: Only the owning provider can modify their plans.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/subscriptions/:
+    get:
+      operationId: subscriptions_list
+      description: |-
+        ViewSet for listing, retrieving, creating, and cancelling subscriptions.
+        Optimized with select_related to prevent N+1 queries.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - CANCELLED
+          - EXPIRED
+          - PAST_DUE
+          - PENDING
+        description: |-
+          * `PENDING` - Pending
+          * `ACTIVE` - Active
+          * `PAST_DUE` - Past Due
+          * `CANCELLED` - Cancelled
+          * `EXPIRED` - Expired
+      tags:
+      - subscriptions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSubscriptionList'
+          description: ''
+    post:
+      operationId: subscriptions_create
+      description: Creates a subscription in PENDING status and generates a simulated
+        payment reference.
+      summary: Subscribe to a plan
+      tags:
+      - subscriptions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          description: Subscription initiated in PENDING state
+        '400':
+          description: Validation error / Inactive plan
+        '409':
+          description: Active or pending subscription already exists
+  /api/subscriptions/{id}/:
+    get:
+      operationId: subscriptions_retrieve
+      description: |-
+        ViewSet for listing, retrieving, creating, and cancelling subscriptions.
+        Optimized with select_related to prevent N+1 queries.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this subscription.
+        required: true
+      tags:
+      - subscriptions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+          description: ''
+  /api/subscriptions/{id}/cancel/:
+    post:
+      operationId: subscriptions_cancel_create
+      description: Sets the subscription status to CANCELLED.
+      summary: Cancel a subscription
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this subscription.
+        required: true
+      tags:
+      - subscriptions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+          description: ''
+        '403':
+          description: Permission denied
+components:
+  schemas:
+    BillingIntervalEnum:
+      enum:
+      - MONTHLY
+      - YEARLY
+      type: string
+      description: |-
+        * `MONTHLY` - Monthly
+        * `YEARLY` - Yearly
+    PaginatedPlanList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+    PaginatedSubscriptionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscription'
+    PatchedPlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        billing_interval:
+          $ref: '#/components/schemas/BillingIntervalEnum'
+        is_active:
+          type: boolean
+    PatchedUserRequest:
+      type: object
+      description: |-
+        User details serializer.
+        The 'role' field is strictly READ-ONLY to prevent users from escalating privileges.
+      properties:
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+    PaymentWebhookRequest:
+      type: object
+      properties:
+        event:
+          type: string
+          minLength: 1
+        reference:
+          type: string
+          minLength: 1
+        provider_reference:
+          type: string
+          default: ''
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - amount
+      - event
+      - reference
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        billing_interval:
+          $ref: '#/components/schemas/BillingIntervalEnum'
+        is_active:
+          type: boolean
+        provider_id:
+          type: integer
+          readOnly: true
+        provider_email:
+          type: string
+          format: email
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+      - price
+      - provider_email
+      - provider_id
+      - updated_at
+    PlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        billing_interval:
+          $ref: '#/components/schemas/BillingIntervalEnum'
+        is_active:
+          type: boolean
+      required:
+      - name
+      - price
+    StatusEnum:
+      enum:
+      - PENDING
+      - ACTIVE
+      - PAST_DUE
+      - CANCELLED
+      - EXPIRED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `ACTIVE` - Active
+        * `PAST_DUE` - Past Due
+        * `CANCELLED` - Cancelled
+        * `EXPIRED` - Expired
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        customer_id:
+          type: integer
+          readOnly: true
+        customer_email:
+          type: string
+          format: email
+          readOnly: true
+        plan:
+          allOf:
+          - $ref: '#/components/schemas/Plan'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          readOnly: true
+        start_date:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        end_date:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        next_billing_date:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - customer_email
+      - customer_id
+      - end_date
+      - id
+      - next_billing_date
+      - plan
+      - start_date
+      - status
+      - updated_at
+    SubscriptionCreateRequest:
+      type: object
+      properties:
+        plan_id:
+          type: integer
+      required:
+      - plan_id
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+      required:
+      - refresh
+    User:
+      type: object
+      description: |-
+        User details serializer.
+        The 'role' field is strictly READ-ONLY to prevent users from escalating privileges.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRoleEnum'
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - id
+      - role
+    UserLoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - email
+      - password
+    UserRegistration:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRegistrationRoleEnum'
+          default: CUSTOMER
+      required:
+      - email
+      - id
+    UserRegistrationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 255
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRegistrationRoleEnum'
+          default: CUSTOMER
+      required:
+      - email
+      - password
+    UserRegistrationRoleEnum:
+      enum:
+      - CUSTOMER
+      - PROVIDER
+      type: string
+      description: |-
+        * `CUSTOMER` - Customer
+        * `PROVIDER` - Provider
+    UserRoleEnum:
+      enum:
+      - CUSTOMER
+      - PROVIDER
+      - ADMIN
+      type: string
+      description: |-
+        * `CUSTOMER` - Customer
+        * `PROVIDER` - Provider
+        * `ADMIN` - Admin
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,26 @@
+# Core Django & REST Framework
+Django>=5.1,<5.2
+djangorestframework>=3.15.2,<4.0
+djangorestframework-simplejwt>=5.3.1
+django-filter>=24.3
+django-cors-headers>=4.4.0
+
+# Database & Environment
+psycopg[binary]>=3.2.1
+dj-database-url>=2.2.0
+python-dotenv>=1.0.1
+
+# Background Processing & Caching
+celery>=5.4.0
+django-celery-beat>=2.7.0
+redis>=5.0.8
+
+# Date utilities
+python-dateutil>=2.9.0.post0
+
+# API Documentation (Bonus)
+drf-spectacular>=0.27.2
+
+# Testing & Linting
+pytest>=8.3.2
+pytest-django>=4.9.0

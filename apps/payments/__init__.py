@@ -1,0 +1,1 @@
+"""Payments application package."""
